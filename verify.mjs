@@ -10,7 +10,9 @@
 // For every Issue it checks:
 //   1. the checkpoints form one unbroken chain: numbered 1, 2, 3 … with no gaps, each linked to the
 //      hash of the one before, time moving forward, the running total never falling;
-//   2. every signature was made by the private half of the published public key;
+//   2. every signature was made by the private half of the published public key, and every
+//      time-stamp receipt is about that checkpoint (its hash is inside it) — full verification of
+//      the authority's own signature is `openssl ts -verify`, as METHOD.md explains;
 //   3. for a CLOSED Issue: every day's published tally and secret reproduce that day's seal, the
 //      tally adds up, and no count — national or in any seat — ever went down.
 // It prints every problem it finds, and exits 1 if there were any.
@@ -100,6 +102,7 @@ async function main() {
 
   let checked = 0
   let signed = 0
+  let receipts = 0
   for (const entry of record.issues ?? []) {
     const cps = entry.checkpoints ?? []
     if (cps.length === 0) note(entry.issue, 'no checkpoints')
@@ -122,7 +125,15 @@ async function main() {
         if (!ok) note(entry.issue, `checkpoint ${i + 1}: signature does not check`)
         else signed++
       }
-      previous = await sha256Hex(canonicalJson(bare))
+      const hash = await sha256Hex(canonicalJson(bare))
+      for (const t of c.timestamps ?? []) {
+        // ⚠️ Buffer.includes, not Uint8Array.includes: the latter looks for ONE byte, so it said
+        // every genuine receipt was for another checkpoint — caught by its test, 2026-09-19.
+        if (!Buffer.from(t.receipt, 'base64').includes(Buffer.from(hash, 'hex'))) {
+          note(entry.issue, `checkpoint ${i + 1}: the ${t.authority} receipt is for a different checkpoint`)
+        } else receipts++
+      }
+      previous = hash
       checked++
     }
 
@@ -143,7 +154,10 @@ async function main() {
     }
   }
 
-  console.log(`checked ${checked} checkpoint(s) across ${(record.issues ?? []).length} Issue(s); ${signed} signature(s) valid`)
+  console.log(
+    `checked ${checked} checkpoint(s) across ${(record.issues ?? []).length} Issue(s); ` +
+      `${signed} signature(s) valid; ${receipts} time-stamp receipt(s) about the right checkpoint`,
+  )
   if (checked === 0) problems.push('record: nothing to check')
   if (problems.length > 0) {
     for (const p of problems) console.error(`PROBLEM  ${p}`)

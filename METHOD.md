@@ -62,6 +62,22 @@ is published as the raw 64 bytes r‖s in base64, beside the ARN of the AWS KMS 
 record's `publicKeys` maps that ARN to the key's public half (SubjectPublicKeyInfo DER, base64). The
 private half was created inside AWS KMS and cannot be exported.
 
+## The time-stamp receipts
+
+Each checkpoint also carries receipts from independent time-stamping authorities (RFC 3161) —
+DigiCert and GlobalSign. A receipt says that the checkpoint's hash, `SHA-256(canonical form of the
+checkpoint)`, existed at a stated moment, signed by the authority. Euthyna cannot backdate one, so a
+record rebuilt later would have no receipts from earlier days.
+
+Each receipt is the authority's whole reply (TimeStampResp, DER, base64). To check one completely,
+with nothing of Euthyna's, save it to a file and run OpenSSL 3:
+
+```
+openssl ts -verify -digest <checkpoint hash in hex> -in receipt.tsr -CAfile <trusted roots>.pem
+```
+
+It prints `Verification: OK` only if the authority signed exactly that hash.
+
 ## Checking it, once an Issue closes
 
 1. Every checkpoint you kept is in the chain: numbered 1, 2, 3 … with no gaps, each `previous`
