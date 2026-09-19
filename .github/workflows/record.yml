@@ -1,0 +1,40 @@
+# Once a day, fetch Euthyna's published count record, check it, and commit it here.
+#
+# This repository is the independent copy: GitHub timestamps every commit and keeps every version,
+# so Euthyna cannot later change what was published on any day without it showing here.
+name: Record Euthyna's count
+
+on:
+  schedule:
+    - cron: '30 15 * * *' # 01:30 Sydney standard time, after the day's checkpoints are taken
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Fetch the record
+        run: |
+          # --max-redirs 0: while euthyna.com.au is closed it redirects to a holding page, and a
+          # holding page must never be saved as though it were the record.
+          if ! curl -fsS --max-redirs 0 https://euthyna.com.au/tally/checkpoints.json -o new.json; then
+            echo "::notice::No record published today (the site may be closed). Nothing saved."
+            exit 0
+          fi
+          mv new.json checkpoints.json
+      - name: Check it
+        run: node verify.mjs checkpoints.json
+      - name: Keep it
+        run: |
+          git config user.name 'euthyna-record'
+          git config user.email 'help@euthyna.com.au'
+          git add checkpoints.json
+          git diff --cached --quiet || git commit -m "Record as published $(date -u +%Y-%m-%d)"
+          git push
