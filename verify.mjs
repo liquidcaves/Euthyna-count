@@ -13,8 +13,9 @@
 //   2. every signature was made by the private half of the published public key, and every
 //      time-stamp receipt is about that checkpoint (its hash is inside it) — full verification of
 //      the authority's own signature is `openssl ts -verify`, as METHOD.md explains;
-//   3. for a CLOSED Issue: every day's published tally and secret reproduce that day's seal, the
-//      tally adds up, and no count — national or in any seat — ever went down.
+//   3. for a CLOSED Issue: the FINAL day's published tally and secret reproduce its seal, the
+//      tally adds up, and it matches the checkpoint's total. Earlier days stay sealed but
+//      unopened; an earlier day that IS opened is reported as a problem (METHOD.md explains why).
 // It prints every problem it finds, and exits 1 if there were any.
 
 import { readFileSync } from 'node:fs'
@@ -66,21 +67,8 @@ function canonicalTally(t) {
   return canonicalJson({ ...t, seats: [...t.seats].sort((a, b) => (a.seat < b.seat ? -1 : a.seat > b.seat ? 1 : 0)) })
 }
 
-function fell(earlier, later) {
-  const out = []
-  const now = new Map(later.national.map((c) => [c.answer, c.count]))
-  for (const c of earlier.national) if ((now.get(c.answer) ?? -1) < c.count) out.push(`national "${c.answer}" fell`)
-  const seats = new Map(later.seats.map((s) => [s.seat, s]))
-  for (const s of earlier.seats) {
-    const n = seats.get(s.seat)
-    if (!n) { out.push(`seat ${s.seat} disappeared`); continue }
-    if (n.responses < s.responses) out.push(`seat ${s.seat} responses fell`)
-    if (s.answers && n.answers) {
-      const m = new Map(n.answers.map((c) => [c.answer, c.count]))
-      for (const c of s.answers) if ((m.get(c.answer) ?? -1) < c.count) out.push(`seat ${s.seat} "${c.answer}" fell`)
-    }
-  }
-  return out
+function tallyTotal(t) {
+  return t.national.reduce((n, c) => n + c.count, 0)
 }
 
 async function main() {
@@ -138,16 +126,19 @@ async function main() {
     }
 
     if (entry.state === 'closed') {
+      // Only the FINAL day is opened (METHOD.md, "Why only the final day is opened"). Two opened
+      // days could be subtracted seat by seat to reveal one person's vote, so an earlier day
+      // being opened is itself a problem, not a bonus.
       const opened = entry.opened ?? []
-      if (opened.length !== cps.length) note(entry.issue, `closed, but ${opened.length} of ${cps.length} days opened`)
+      const last = cps.length
+      if (!opened.some((o) => o.sequence === last)) note(entry.issue, `closed, but its final day (${last}) is not opened`)
       for (const o of opened) {
+        if (o.sequence !== last) note(entry.issue, `day ${o.sequence} is opened — only the final day may be, or votes can be worked out by subtraction`)
         const c = cps[o.sequence - 1]
         for (const p of tallyProblems(o.tally)) note(entry.issue, `day ${o.sequence}: ${p}`)
         const seal = await sha256Hex(`euthyna-tally-seal/1\n${canonicalTally(o.tally)}\n${o.secret}`)
         if (!c || seal !== c.seal) note(entry.issue, `day ${o.sequence}: the tally and secret do not reproduce the seal`)
-      }
-      for (let i = 1; i < opened.length; i++) {
-        for (const p of fell(opened[i - 1].tally, opened[i].tally)) note(entry.issue, `day ${opened[i].sequence}: ${p}`)
+        if (c && tallyTotal(o.tally) !== c.responses) note(entry.issue, `day ${o.sequence}: the tally adds to ${tallyTotal(o.tally)}, the checkpoint says ${c.responses}`)
       }
     } else if (entry.opened) {
       note(entry.issue, 'an OPEN Issue published its secrets — its running result is exposed')

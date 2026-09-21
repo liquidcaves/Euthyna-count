@@ -33,7 +33,8 @@ seal = SHA-256( "euthyna-tally-seal/1" + "\n" + canonical tally + "\n" + secret 
 ```
 
 as lowercase hex. `secret` is 32 random bytes as 64 lowercase hex characters, **fresh for every
-seal**, kept private while the Issue is open and published when it closes. Without it, the small
+seal**, kept private while the Issue is open. When it closes, the **final day's** secret and tally
+are published; earlier days' stay sealed (see "Why only the final day is opened"). Without it, the small
 numbers in a tally could be guessed from the seal by trying every combination, which would leak an
 open Issue's result.
 
@@ -82,9 +83,22 @@ It prints `Verification: OK` only if the authority signed exactly that hash.
 
 1. Every checkpoint you kept is in the chain: numbered 1, 2, 3 … with no gaps, each `previous`
    matching the hash of the one before, time moving forward, `responses` never falling.
-2. For each checkpoint, the published tally for that day and its secret reproduce its `seal`.
-3. Between any two days, no count — national, or in any seat whose split is shown on both days —
-   went down, and no seat disappeared.
+2. The final checkpoint's published tally and secret reproduce its `seal`, and the tally adds up
+   to that checkpoint's `responses`.
+3. No earlier day is opened. If one is, that is a fault in the record, not extra evidence.
+
+## Why only the final day is opened
+
+Every daily tally carries each seat's split. If two consecutive days were both opened, anyone
+could subtract one from the other, seat by seat. Wherever a seat gained exactly one response
+between those days, the difference is one person's answer — and whoever knew that person
+answered that day would learn how they answered. So only the final count is opened.
+
+What this costs, stated plainly: you can still check that the running total never fell (step 1,
+from `responses`, which every checkpoint carries), and that the final count is exactly what was
+sealed on the final day. You cannot check, seat by seat, that no count fell between two earlier
+days. Every earlier day remains sealed, signed and time-stamped, so none of them can have been
+rewritten after it was taken; its contents are simply not released. Decided 2026-09-22.
 
 `verify.mjs` in this repository does all of these checks, including the signatures. It is written
 from this description alone, so it doesn't depend on any of Euthyna's code.
