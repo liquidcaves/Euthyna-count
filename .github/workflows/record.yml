@@ -23,16 +23,28 @@ jobs:
       - name: Fetch the record
         id: fetch
         run: |
-          # --max-redirs 0: while euthyna.com.au is closed it redirects to a holding page, and a
-          # holding page must never be saved as though it were the record.
+          # While euthyna.com.au is closed, the address answers 307 with a one-byte body of "/",
+          # and the day's record is not published at all. That is a normal night, not a failure.
           #
-          # `exit 0` ends THIS step only. Until 2026-09-22 the two steps below ran regardless, so
-          # every night the site was closed the checker ran on a file that did not exist and the
-          # job failed — three nights running, and a job that fails every night hides the night
-          # a real failure arrives. They now run only when a record was actually fetched.
-          if ! curl -fsS --max-redirs 0 https://euthyna.com.au/tally/checkpoints.json -o new.json; then
-            echo "::notice::No record published today (the site may be closed). Nothing saved."
+          # ⚠️ A REDIRECT IS NOT AN ERROR TO curl. `-f` fails only on 400 and above, so the
+          # 2026-09-22 fix — which assumed a closed site would make curl fail — saved the body "/"
+          # as the record and the checker then died on "Unexpected token '/'", three nights
+          # running. The status code and the content are BOTH checked here, because either alone
+          # has now been observed passing while the file was rubbish.
+          #
+          # `exit 0` ends THIS step only; the two below run only when a record really arrived.
+          code=$(curl -sS --max-redirs 0 -o new.json -w '%{http_code}' \
+            https://euthyna.com.au/tally/checkpoints.json) || code=000
+          if [ "$code" != "200" ]; then
+            echo "::notice::No record published today — the site answered $code. Nothing saved."
             echo "fetched=false" >> "$GITHUB_OUTPUT"
+            rm -f new.json
+            exit 0
+          fi
+          if ! node -e 'JSON.parse(require("fs").readFileSync("new.json","utf8"))' 2>/dev/null; then
+            echo "::notice::The address answered 200 with something that is not the record. Nothing saved."
+            echo "fetched=false" >> "$GITHUB_OUTPUT"
+            rm -f new.json
             exit 0
           fi
           mv new.json checkpoints.json
